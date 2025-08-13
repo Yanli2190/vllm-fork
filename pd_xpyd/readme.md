@@ -1,8 +1,20 @@
 # Prefill/Decode Disaggregation & Data Parallel Usage Guide
 
+## Pre-requisites
+Make sure DeepSeek-R1 Single Node or Multi-Node NON-PD solution run successfully following [Non-PD DeepSeek-R1 README] (https://github.com/HabanaAI/vllm-fork/tree/deepseek_r1/scripts/quickstart )
+
 ## System setup
 In host OS:
+### Set CPU to performance mode
 
+```bash
+cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+```
+
+### Eanble huge page
+#
 ```bash
 echo always > /sys/kernel/mm/transparent_hugepage/enabled
 echo 32768 > /proc/sys/vm/nr_hugepages
@@ -96,7 +108,7 @@ step2: launch prefill server: source 1p_start_prefill.sh $machine benchmark
 step3: launch decode server(s) as normal
 step4: launch proxy server: bash xpyd_start_proxy.sh 1 2 1 false benchmark 
 step5: lanch client command with only 1 prompt
-python3 benchmarks/benchmark_serving.py --backend vllm --model /mnt/disk2/hf_models/DeepSeek-R1-BF16-w8afp8-static-no-ste-G2/ --dataset-name sonnet --request-rate inf --host 10.239.129.9 --port 8868 --sonnet-input-len 2000 --sonnet-output-len 1000 --sonnet-prefix-len 100 --trust-remote-code --max-concurrency 1024 --num-prompts 1 --ignore-eos --burstiness 1000 --dataset-path benchmarks/sonnet.txt --save-result
+python3 benchmarks/benchmark_serving.py --backend vllm --model /mnt/disk2/hf_models/DeepSeek-R1-G2/ --dataset-name sonnet --request-rate inf --host 10.239.129.9 --port 8868 --sonnet-input-len 2000 --sonnet-output-len 1000 --sonnet-prefix-len 100 --trust-remote-code --max-concurrency 1024 --num-prompts 1 --ignore-eos --burstiness 1000 --dataset-path benchmarks/sonnet.txt --save-result
 ```
 ```bash
 # note: If the vllm is is shared across nodes (i.e. one code base in nfs, and multi-nodes link to the same code base),

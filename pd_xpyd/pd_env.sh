@@ -58,9 +58,9 @@ unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLO
 INC_FP8=0
 
 if [ "$INC_FP8" -eq 1 ]; then
-  model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2/
+  model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2-INC/
 else
-  model_path=/mnt/disk2/hf_models/DeepSeek-R1-BF16-w8afp8-static-no-ste-G2/
+  model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2/
 fi
 
 unset QUANT_CONFIG VLLM_REQUANT_FP8_INC VLLM_ENABLE_RUNTIME_DEQUANT VLLM_HPU_MARK_SCALES_AS_CONST
