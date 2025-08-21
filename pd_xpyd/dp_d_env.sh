@@ -12,7 +12,8 @@ export VLLM_GRAPH_RESERVED_MEM=0.2
 export VLLM_GRAPH_PROMPT_RATIO=0
 
 # enable delayed samping on decode
-export VLLM_DELAYED_SAMPLING="true"
+#export VLLM_DELAYED_SAMPLING="true"
+export VLLM_DELAYED_SAMPLING="false"
 
 # params
 model_len=32768
