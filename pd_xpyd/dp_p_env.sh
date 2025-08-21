@@ -6,19 +6,19 @@ source "$BASH_DIR"/pd_env.sh
 
 export VLLM_EP_SIZE=8
 
-model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2/
+model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2-static/
 
 export VLLM_GPU_MEMORY_UTILIZATION=0.6
 export VLLM_GRAPH_RESERVED_MEM=0.2
 export VLLM_GRAPH_PROMPT_RATIO=1
 
 # params
-model_len=32768
-max_num_batched_tokens=32768
+model_len=34816
+max_num_batched_tokens=34816
 max_num_seqs=16
 input_min=128
-input_max=32768
-output_max=32768
+input_max=34816
+output_max=34816
 
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX
 unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX
