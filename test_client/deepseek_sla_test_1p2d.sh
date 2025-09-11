@@ -42,35 +42,49 @@ test_benchmark_serving_request_rate() {
 
 num_of_p_node=1
 
-test_benchmark_serving_request_rate 256 256 64 1.0 $num_of_p_node
-test_benchmark_serving_request_rate 256 256 96 1.0 $num_of_p_node
-test_benchmark_serving_request_rate 256 256 368 1.0 $num_of_p_node
-test_benchmark_serving_request_rate 256 256 384 1.0 $num_of_p_node
+if [ "$1" = "sla_benchmark" ]; then
+    test_benchmark_serving_request_rate 256 256 64 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 256 256 96 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 256 256 368 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 256 256 384 1.0 $num_of_p_node
 
-test_benchmark_serving_request_rate 256 1024 64 1.0 $num_of_p_node
-test_benchmark_serving_request_rate 256 1024 96 1.0 $num_of_p_node
-test_benchmark_serving_request_rate 256 1024 800 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 256 1024 64 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 256 1024 96 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 256 1024 800 1.0 $num_of_p_node
 
-test_benchmark_serving_request_rate 1024 256 64 1.0 $num_of_p_node
-test_benchmark_serving_request_rate 1024 256 96 1.0 $num_of_p_node
-test_benchmark_serving_request_rate 1024 256 224 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 1024 256 64 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 1024 256 96 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 1024 256 224 1.0 $num_of_p_node
 
-test_benchmark_serving_request_rate 512 512 64 1.0 $num_of_p_node
-test_benchmark_serving_request_rate 512 512 96 1.0 $num_of_p_node
-test_benchmark_serving_request_rate 512 512 640 1.0 $num_of_p_node
-test_benchmark_serving_request_rate 512 512 800 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 512 512 64 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 512 512 96 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 512 512 640 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 512 512 800 1.0 $num_of_p_node
 
-test_benchmark_serving_request_rate 1024 1024 64 1.0 $num_of_p_node
-test_benchmark_serving_request_rate 1024 1024 672 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 1024 1024 64 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 1024 1024 672 1.0 $num_of_p_node
 
-test_benchmark_serving_request_rate 2048 1024 64 1.0 $num_of_p_node
-test_benchmark_serving_request_rate 2048 1024 224 1.0 $num_of_p_node
-test_benchmark_serving_request_rate 2048 1024 256 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 2048 1024 64 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 2048 1024 224 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 2048 1024 256 1.0 $num_of_p_node
 
-test_benchmark_serving_request_rate 3584 1536 48 1.0 $num_of_p_node
-test_benchmark_serving_request_rate 3584 1536 384 1.0 $num_of_p_node
-test_benchmark_serving_request_rate 3584 1536 512 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 3584 1536 48 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 3584 1536 384 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 3584 1536 512 1.0 $num_of_p_node
 
-test_benchmark_serving_request_rate 8192 1024 32 1.0 $num_of_p_node
-test_benchmark_serving_request_rate 8192 1024 64 1.0 $num_of_p_node
-test_benchmark_serving_request_rate 8192 1024 96 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 8192 1024 32 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 8192 1024 64 1.0 $num_of_p_node
+    test_benchmark_serving_request_rate 8192 1024 96 1.0 $num_of_p_node
+else
+    for bs in 1 2 4 8 16 32 64 96 128 192 208 224 256 384 512 672 800 1024
+    do
+        test_benchmark_serving_request_rate 256 256 $bs 1.0 $num_of_p_node 
+        test_benchmark_serving_request_rate 256 1024 $bs 1.0 $num_of_p_node
+        test_benchmark_serving_request_rate 1024 256 $bs 1.0 $num_of_p_node
+        test_benchmark_serving_request_rate 512 512 $bs 1.0 $num_of_p_node
+        test_benchmark_serving_request_rate 1024 1024 $bs 1.0 $num_of_p_node
+        test_benchmark_serving_request_rate 2048 1024 $bs 1.0 $num_of_p_node
+        test_benchmark_serving_request_rate 3584 1536 $bs 1.0 $num_of_p_node
+        test_benchmark_serving_request_rate 8192 1024 $bs 1.0 $num_of_p_node
+    done
+fi

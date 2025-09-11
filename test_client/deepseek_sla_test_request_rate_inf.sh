@@ -33,10 +33,12 @@ test_benchmark_serving() {
     mv benchmark_serving_DeepSeek* benchmark_log
 }
 
-for bs in 1 16 32 48 64 128 224 256 384 512 640 672 800 1024
+config="${1:-1p2d}"
+
+echo "Runing under config: $config"
+
+for bs in 1 2 4 8 16 32 64 96 128 192 208 224 256 384 512 672 800 1024 1280
 do
-  config=1p2d
-  echo $config
   test_benchmark_serving 256 256 $bs $config
   test_benchmark_serving 256 1024 $bs $config
   test_benchmark_serving 1024 256 $bs $config
