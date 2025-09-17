@@ -81,7 +81,7 @@ if [ "$DEBUG_PROFILE" == "1" ]; then
 fi
 
 if [ "$INC_FP8" -eq 1 ]; then
-  model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2/
+  model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2-inc/
 else
   model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2-static/
 fi
