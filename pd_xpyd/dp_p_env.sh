@@ -46,8 +46,9 @@ export VLLM_USE_V1=0
 export VLLM_EP_SIZE=8
 
 # warmup settings
-export VLLM_SKIP_WARMUP=True
+#export VLLM_SKIP_WARMUP=True
 #export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_p_cache,false,131072
+export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww38_pd_p_cache,false,131072
 
 # MoE settings
 export VLLM_SUPPORT_MOE_CHUNK="false"  # Can be true after following para are tuned.
