@@ -908,7 +908,8 @@ class FusedMoE(torch.nn.Module):
             cu_tokens_across_dp_cpu = get_forward_context(
             ).dp_metadata.cu_tokens_across_dp_cpu
 
-            if self.activation_scheme != "static" or self.dp_opt < 4:
+            if (self.activation_scheme != "static" or self.dp_opt < 4) and
+                os.environ.get('ENABLE_PACKED_ALLGATHER', '0').lower() in ('false', '0')):
                 hidden_states_across_dp = get_forward_context(
                 ).dp_metadata.hidden_states_across_dp
                 hidden_states = self.multicast_fn(hidden_states,
