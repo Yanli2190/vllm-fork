@@ -1,6 +1,7 @@
 #!/bin/bash
 
-model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2/
+#model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2/
+model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2-static/
 ip_addr=127.0.0.1
 port=8868
 
