@@ -3,6 +3,12 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/pd_bucket.sh
 source "$BASH_DIR"/pd_env.sh
 
+export VLLM_USE_NUMACTL=1
+
+# This is to avoid logic in torch.distributed.hccl.__init__.py _setup_module_id overwriting
+# this env var incorrectly
+export HLS_MODULE_ID=-1
+
 export VLLM_GPU_MEMORY_UTILIZATION=0.8
 export VLLM_GRAPH_RESERVED_MEM=0.3
 export VLLM_GRAPH_PROMPT_RATIO=0
