@@ -13,6 +13,12 @@ export VLLM_GPU_MEMORY_UTILIZATION=0.8
 export VLLM_GRAPH_RESERVED_MEM=0.3
 export VLLM_GRAPH_PROMPT_RATIO=0
 
+if [ "$INC_FP8" -eq 1 ]; then
+  export VLLM_GPU_MEMORY_UTILIZATION=0.9
+  export VLLM_GRAPH_RESERVED_MEM=0.5
+  export VLLM_GRAPH_PROMPT_RATIO=0
+fi
+
 # enable delayed samping on decode
 export VLLM_DELAYED_SAMPLING="true"
 
@@ -64,7 +70,7 @@ export VLLM_EP_SIZE=16
 #export VLLM_SKIP_WARMUP=True
 #export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_d_cache,false,131072
 if [ "$INC_FP8" -eq 1 ]; then
-  export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww38_pd_fp8_inc_d_cache,false,131072
+  export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww38_pd_fp8_inc_d_cache,false,13107200
 else
   export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww38_pd_bf16_d_cache,false,131072
 fi
