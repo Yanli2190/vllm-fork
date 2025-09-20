@@ -1205,6 +1205,7 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             # Allocate receive buffer: world_size copies of packed
             per_rank_elems = packed.numel()
 
+            from torch import distributed as dist
             # Single collective
             dist.all_gather_into_tensor(recv, packed, group=get_dp_group().device_group)
 
