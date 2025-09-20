@@ -3,7 +3,6 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/pd_bucket.sh
 source "$BASH_DIR"/pd_env.sh
 
-export ENABLE_PACKED_ALLGATHER=1
 export VLLM_USE_NUMACTL=1
 
 # This is to avoid logic in torch.distributed.hccl.__init__.py _setup_module_id overwriting
@@ -18,6 +17,7 @@ if [ "$INC_FP8" -eq 1 ]; then
   export VLLM_GPU_MEMORY_UTILIZATION=0.9
   export VLLM_GRAPH_RESERVED_MEM=0.5
   export VLLM_GRAPH_PROMPT_RATIO=0
+  export ENABLE_PACKED_ALLGATHER=1
 fi
 
 # enable delayed samping on decode
