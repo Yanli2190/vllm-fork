@@ -944,12 +944,12 @@ class Fp8MoEMethod(FusedMoEMethodBase):
             x_scale = layer.w13_input_scale.data
             x = torch.ops.hpu.cast_to_fp8_v2(x, 1.0/x_scale, False, False, torch.float8_e4m3fn)[0]
             if os.environ.get('ENABLE_PACKED_ALLGATHER', '0').lower() in ('false', '0'):
-              cu_tokens_across_dp_cpu = get_forward_context(
-              ).dp_metadata.cu_tokens_across_dp_cpu
-              hidden_states_across_dp = get_forward_context(
-              ).dp_metadata.hidden_states_across_dp
-              x = layer.multicast_fn(x, cu_tokens_across_dp_cpu,\
-                hidden_states_across_dp)
+                cu_tokens_across_dp_cpu = get_forward_context(
+                ).dp_metadata.cu_tokens_across_dp_cpu
+                hidden_states_across_dp = get_forward_context(
+                ).dp_metadata.hidden_states_across_dp
+                x = layer.multicast_fn(x, cu_tokens_across_dp_cpu,\
+                    hidden_states_across_dp)
 
         num_experts = layer.local_num_experts
         n_expert_slice = num_experts // self.moe_n_slice
