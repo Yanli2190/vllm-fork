@@ -17,7 +17,7 @@ if [ "$INC_FP8" -eq 1 ]; then
   export VLLM_GPU_MEMORY_UTILIZATION=0.9
   export VLLM_GRAPH_RESERVED_MEM=0.5
   export VLLM_GRAPH_PROMPT_RATIO=0
-  export ENABLE_PACKED_ALLGATHER=1
+  #export ENABLE_PACKED_ALLGATHER=1
 fi
 
 # enable delayed samping on decode
