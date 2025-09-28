@@ -47,7 +47,7 @@ unset QUANT_CONFIG VLLM_REQUANT_FP8_INC VLLM_ENABLE_RUNTIME_DEQUANT VLLM_HPU_MAR
 DEBUG_LOG=1
 DEBUG_GRAPH=0
 DEBUG_PROFILE=0
-INC_FP8=0
+INC_FP8=1
 BENCHMARK_MODE=0
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONFIG END ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
@@ -81,7 +81,7 @@ if [ "$DEBUG_PROFILE" == "1" ]; then
 fi
 
 if [ "$INC_FP8" -eq 1 ]; then
-  model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2/
+  model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2-inc/
 else
   model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2-static/
 fi
@@ -92,5 +92,6 @@ if [ "$INC_FP8" -eq 1 ]; then
   export VLLM_ENABLE_RUNTIME_DEQUANT=1
   export VLLM_MOE_N_SLICE=1
   export VLLM_HPU_MARK_SCALES_AS_CONST=false
+  export RUNTIME_SCALE_PATCHING=1
 fi
 
