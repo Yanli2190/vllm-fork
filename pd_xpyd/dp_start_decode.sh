@@ -39,6 +39,12 @@ fi
 if [ "$INC_FP8" -eq 1 ]; then
   kv_cache_dtype_arg="--kv-cache-dtype fp8_inc"
   echo "<decode>it's inc fp8 kv cache mode"
+  # INC FP8 settings
+  if [ "EP_SIZE" -eq 32 ]; then
+    export QUANT_CONFIG="$BASH_DIR"/inc_fp8_tp1ep32.json
+  else
+    export QUANT_CONFIG="$BASH_DIR"/inc_fp8_tp1ep16.json
+  fi
 else
   kv_cache_dtype_arg=""
   echo "<decode>it's bf16 kv cache mode"
