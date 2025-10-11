@@ -5,7 +5,7 @@ source "$BASH_DIR"/pd_bucket.sh
 source "$BASH_DIR"/pd_env.sh
 
 
-export VLLM_GPU_MEMORY_UTILIZATION=0.7
+export VLLM_GPU_MEMORY_UTILIZATION=0.6
 export VLLM_GRAPH_RESERVED_MEM=0.1
 export VLLM_GRAPH_PROMPT_RATIO=1
 # params
@@ -23,6 +23,8 @@ unset VLLM_DECODE_BS_BUCKET_MIN VLLM_DECODE_BS_BUCKET_STEP VLLM_DECODE_BS_BUCKET
 unset VLLM_DECODE_BLOCK_BUCKET_MIN VLLM_DECODE_BLOCK_BUCKET_STEP VLLM_DECODE_BLOCK_BUCKET_MAX
 
 set_bucketing
+
+export VLLM_PROMPT_SEQ_BUCKET_STEP=256
 
 export VLLM_DECODE_BS_BUCKET_MIN=1
 export VLLM_DECODE_BS_BUCKET_STEP=1
@@ -46,8 +48,13 @@ export VLLM_USE_V1=0
 export VLLM_EP_SIZE=8
 
 # warmup settings
-export VLLM_SKIP_WARMUP=True
+#export VLLM_SKIP_WARMUP=True
 #export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_p_cache,false,131072
+if [ "$INC_FP8" -eq 1 ]; then
+  export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww38_pd_fp8_inc_p_cache,false,262144,false
+else
+  export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww38_pd_bf16_p_cache,false,131072,false
+fi
 
 # MoE settings
 export VLLM_SUPPORT_MOE_CHUNK="false"  # Can be true after following para are tuned.

@@ -3,9 +3,15 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/pd_bucket.sh
 source "$BASH_DIR"/pd_env.sh
 
-export VLLM_GPU_MEMORY_UTILIZATION=0.7
+export VLLM_GPU_MEMORY_UTILIZATION=0.8
 export VLLM_GRAPH_RESERVED_MEM=0.3
 export VLLM_GRAPH_PROMPT_RATIO=0
+
+if [ "$INC_FP8" -eq 1 ]; then
+  export VLLM_GPU_MEMORY_UTILIZATION=0.9
+  export VLLM_GRAPH_RESERVED_MEM=0.6
+  export VLLM_GRAPH_PROMPT_RATIO=0
+fi
 
 # enable delayed samping on decode
 export VLLM_DELAYED_SAMPLING="true"
@@ -34,8 +40,8 @@ export VLLM_PROMPT_SEQ_BUCKET_STEP=128
 export VLLM_PROMPT_SEQ_BUCKET_MAX=1
 
 #export VLLM_DECODE_BLOCK_BUCKET_MIN=2048
-#export VLLM_DECODE_BS_BUCKET_STEP=2
-#export VLLM_DECODE_BLOCK_BUCKET_STEP=2
+export VLLM_DECODE_BS_BUCKET_STEP=2
+export VLLM_DECODE_BLOCK_BUCKET_STEP=128
 
 echo " environments are reseted "
 
@@ -55,8 +61,13 @@ export VLLM_DP_MASTER_PORT=25940
 export VLLM_EP_SIZE=16
 
 # warmup settings
-export VLLM_SKIP_WARMUP=True
+#export VLLM_SKIP_WARMUP=True
 #export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_d_cache,false,131072
+if [ "$INC_FP8" -eq 1 ]; then
+  export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww38_pd_fp8_inc_d_cache,false,262144,false
+else
+  export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/ww38_pd_bf16_d_cache,false,131072,false
+fi
 
 # MoE settings
 export VLLM_SUPPORT_MOE_CHUNK="true"
