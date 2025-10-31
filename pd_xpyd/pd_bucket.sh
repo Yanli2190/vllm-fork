@@ -7,7 +7,7 @@ set_bucketing(){
     input_max=${input_max:-1024}
     output_max=${output_max:-2048}
     block_size=${block_size:-128}
-    BUCKET_PADDING_RATIO=${BUCKET_PADDING_RATIO:-"0.25"}
+    BUCKET_PADDING_RATIO=${BUCKET_PADDING_RATIO:-"0.1"}
 
     prompt_bs_step=1
     prompt_bs_min=1
