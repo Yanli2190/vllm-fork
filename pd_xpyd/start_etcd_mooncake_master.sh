@@ -30,5 +30,3 @@ else
     "${ETCD_CMD[@]}" > /dev/null 2>&1 &
     "${MOON_CMD[@]}" > /dev/null 2>&1 &
 fi
-
-sleep 60s
