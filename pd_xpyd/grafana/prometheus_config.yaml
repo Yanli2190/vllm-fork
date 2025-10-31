@@ -1,0 +1,24 @@
+# Prometheus Monitor Settings
+
+# No need update
+prometheus_port: 9105
+
+# Prefill Server IP
+prefill_ips:
+  - '10.0.0.1'    # Prefill Node1 IP
+  - '10.0.0.2'    # Prefill Node2 IP, if only have 1 prefill, just remove this line
+prefill_port: 8100      # No need update
+
+# Decode Server IP
+decode_ips:
+  - '10.0.0.2'    # Decode Node1 IP
+  - '10.0.0.3'    # Decode Node2 IP, if more decode node existed, just add more lines
+decode_ports:          # No need update
+  - 8200
+  - 8201
+  - 8202
+  - 8203
+  - 8204
+  - 8205
+  - 8206
+  - 8207
