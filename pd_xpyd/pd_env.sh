@@ -94,5 +94,7 @@ if [ "$INC_FP8" -eq 1 ]; then
   export VLLM_HPU_MARK_SCALES_AS_CONST=false
   export RUNTIME_SCALE_PATCHING=1
   export PT_HPU_SDPA_QKV_SLICE_MODE_FWD=0
+  #Enable it for G3D only and disable it by default
+  export ENABLE_PACKED_ALLGATHER=0
 fi
 
