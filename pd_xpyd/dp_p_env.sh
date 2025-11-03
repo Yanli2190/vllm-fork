@@ -47,6 +47,9 @@ export VLLM_DP_SIZE=1
 export VLLM_USE_V1=0
 export VLLM_EP_SIZE=8
 
+# Add env to enable/disable async D2H
+export VLLM_FETCH_KV_USE_ASYNC_D2H=0
+
 # warmup settings
 #export VLLM_SKIP_WARMUP=True
 #export PT_HPU_RECIPE_CACHE_CONFIG=/workspace/pd_p_cache,false,131072
