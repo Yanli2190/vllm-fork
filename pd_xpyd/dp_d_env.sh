@@ -3,7 +3,6 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 source "$BASH_DIR"/pd_bucket.sh
 source "$BASH_DIR"/pd_env.sh
 
-export ENABLE_PACKED_ALLGATHER=1
 export VLLM_USE_NUMACTL=1
 
 # This is to avoid logic in torch.distributed.hccl.__init__.py _setup_module_id overwriting
