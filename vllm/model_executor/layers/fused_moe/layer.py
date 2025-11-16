@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
+import os
 from abc import abstractmethod
 from enum import Enum
 from typing import Callable, List, Optional, Tuple
 
 import torch
-import os
-
 import torch.distributed
+
+import vllm.envs as envs
 from vllm.config import get_current_vllm_config
 from vllm.distributed import (get_dp_group, get_tensor_model_parallel_rank,
                               get_tensor_model_parallel_world_size,
@@ -22,8 +23,6 @@ from vllm.platforms import current_platform
 from vllm.platforms.interface import CpuArchEnum
 from vllm.utils import direct_register_custom_op
 
-import vllm.envs as envs
-
 is_hpu = current_platform.is_hpu()
 
 if current_platform.is_cuda_alike():
@@ -36,7 +35,6 @@ if current_platform.is_tpu():
 else:
     fused_moe_pallas = None  # type: ignore
 logger = init_logger(__name__)
-
 
 VLLM_REQUANT_FP8_INC = os.getenv("VLLM_REQUANT_FP8_INC", "0") in ["1", "true"]
 
@@ -119,8 +117,12 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         elif current_platform.is_hpu():
             num_experts = layer.local_num_experts
             experts_range = range(num_experts)
-            self.w1_list = [layer.w13_weight.data[i].squeeze() for i in experts_range]
-            self.w2_list = [layer.w2_weight.data[i].squeeze() for i in experts_range]
+            self.w1_list = [
+                layer.w13_weight.data[i].squeeze() for i in experts_range
+            ]
+            self.w2_list = [
+                layer.w2_weight.data[i].squeeze() for i in experts_range
+            ]
             ep_shift = layer.ep_rank * num_experts
             self.experts_min, self.experts_max = ep_shift, num_experts + ep_shift - 1
 
@@ -141,21 +143,22 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         e_score_correction_bias: Optional[torch.Tensor] = None,
         ep_rank: Optional[int] = None,
     ) -> torch.Tensor:
-        return self.forward(x=x,
-                            layer=layer,
-                            router_logits=router_logits,
-                            top_k=top_k,
-                            renormalize=renormalize,
-                            use_grouped_topk=use_grouped_topk,
-                            topk_group=topk_group,
-                            num_expert_group=num_expert_group,
-                            global_num_experts=global_num_experts,
-                            expert_map=expert_map,
-                            custom_routing_function=custom_routing_function,
-                            scoring_func=scoring_func,
-                            e_score_correction_bias=e_score_correction_bias,
-                            ep_rank= ep_rank,
-                            )
+        return self.forward(
+            x=x,
+            layer=layer,
+            router_logits=router_logits,
+            top_k=top_k,
+            renormalize=renormalize,
+            use_grouped_topk=use_grouped_topk,
+            topk_group=topk_group,
+            num_expert_group=num_expert_group,
+            global_num_experts=global_num_experts,
+            expert_map=expert_map,
+            custom_routing_function=custom_routing_function,
+            scoring_func=scoring_func,
+            e_score_correction_bias=e_score_correction_bias,
+            ep_rank=ep_rank,
+        )
 
     def forward_cuda(
         self,
@@ -209,7 +212,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         custom_routing_function: Optional[Callable] = None,
         scoring_func: str = "softmax",
         e_score_correction_bias: Optional[torch.Tensor] = None,
-        ep_rank = None,
+        ep_rank=None,
     ):
         if len(x.shape) == 3:
             bs, seq_len, hidden_size = x.shape
@@ -231,9 +234,7 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
         else:
             import torch.nn.functional as F
             topk_weights = F.softmax(router_logits, dim=1, dtype=torch.float32)
-            topk_weights, topk_ids = torch.topk(topk_weights,
-                                                        top_k,
-                                                        dim=-1)
+            topk_weights, topk_ids = torch.topk(topk_weights, top_k, dim=-1)
             topk_weights /= topk_weights.sum(dim=-1, keepdim=True)
 
         topk_ids = topk_ids.to(torch.int32)
@@ -254,15 +255,16 @@ class UnquantizedFusedMoEMethod(FusedMoEMethodBase, CustomOp):
                                               topk_weights_across_dp)
         topk_ids = topk_ids.view(*x.shape[:-1], -1)
         topk_weights = topk_weights.view(*x.shape[:-1], -1)
-        return torch.ops.hpu.mixture_of_experts(hidden_states=x,
-                                                expert_routing_table=topk_ids,
-                                                router_weights=topk_weights,
-                                                w12=self.w1_list,
-                                                w3=self.w2_list,
-                                                permuted_weights=True,
-                                                activation="silu",
-                                                experts_min=self.experts_min,
-                                                experts_max=self.experts_max).view(*input_shape)
+        return torch.ops.hpu.mixture_of_experts(
+            hidden_states=x,
+            expert_routing_table=topk_ids,
+            router_weights=topk_weights,
+            w12=self.w1_list,
+            w3=self.w2_list,
+            permuted_weights=True,
+            activation="silu",
+            experts_min=self.experts_min,
+            experts_max=self.experts_max).view(*input_shape)
 
     def forward_cpu(
         self,
@@ -485,13 +487,20 @@ class FusedMoE(torch.nn.Module):
             if VLLM_REQUANT_FP8_INC:
                 ep_shift = self.ep_rank * self.local_num_experts
                 from vllm.model_executor.layers.vllm_ext_patch import (
-                    VllmMixtureOfExpertsOpFP8,
-                )
-                moe_n_slice = int(os.environ.get("VLLM_MOE_N_SLICE", 4))
-                assert moe_n_slice == 1, (
-                    f"moe_n_slice is {moe_n_slice}, expected 1 when using VLLM_REQUANT_FP8_INC"
-                )
-                num_expert_per_group = self.local_num_experts // moe_n_slice
+                    VllmMixtureOfExpertsOpFP8)
+
+                moe_n_slice = int(os.environ.get("VLLM_MOE_N_SLICE", 1))
+                if moe_n_slice != 1:
+                    logger.warning_once(
+                        f"Be careful that moe_n_slice is set to {moe_n_slice}, "
+                        f"Please confirm that the current process is not performing calibration."
+                    )
+                # assert moe_n_slice == 1, (
+                #     f"moe_n_slice is {moe_n_slice}, expected 1 when using VLLM_REQUANT_FP8_INC"
+                # )
+                # num_expert_per_group = self.local_num_experts // moe_n_slice
+                num_expert_per_group = self.local_num_experts
+
                 experts_min, experts_max = 0, self.local_num_experts
                 moe_op = VllmMixtureOfExpertsOpFP8(
                     num_expert_per_group,
@@ -504,7 +513,6 @@ class FusedMoE(torch.nn.Module):
                 from vllm_hpu_extension.ops import DynamicFusedMOE
 
                 self.hpu_fused_moe = DynamicFusedMOE(self.local_num_experts)
-            
 
         self.scoring_func = scoring_func
         self.e_score_correction_bias = e_score_correction_bias
@@ -592,8 +600,7 @@ class FusedMoE(torch.nn.Module):
     def _load_per_channel_weight_scale(self, expert_data: torch.Tensor,
                                        shard_dim: int, shard_id: str,
                                        loaded_weight: torch.Tensor,
-                                       tp_rank: int,
-                                       expert_id: int):
+                                       tp_rank: int, expert_id: int):
         # for per channel weight quantization
         if shard_id == "w2":
             expert_data.copy_(loaded_weight)
@@ -850,7 +857,8 @@ class FusedMoE(torch.nn.Module):
 
         return topk_weights, topk_ids
 
-    def hpu_multicast(self, x: torch.Tensor,
+    def hpu_multicast(self,
+                      x: torch.Tensor,
                       cu_tokens_across_dp_cpu: torch.Tensor,
                       output_tensor: Optional[torch.Tensor] = None):
         if output_tensor is None:
@@ -866,11 +874,12 @@ class FusedMoE(torch.nn.Module):
             if output_tensor.ndim == 3 and x.ndim == 2:
                 output_tensor.view(-1, x.size(1))
         # All-gather.
-        torch.distributed.all_gather_into_tensor(output_tensor, x,
-                                                 group=get_dp_group().device_group)
+        torch.distributed.all_gather_into_tensor(
+            output_tensor, x, group=get_dp_group().device_group)
         return output_tensor
 
-    def naive_multicast(self, x: torch.Tensor,
+    def naive_multicast(self,
+                        x: torch.Tensor,
                         cu_tokens_across_dp_cpu: torch.Tensor,
                         output_tensor: Optional[torch.Tensor] = None):
         assert (len(x.shape) in [2, 3])
@@ -915,7 +924,6 @@ class FusedMoE(torch.nn.Module):
                                                   cu_tokens_across_dp_cpu,
                                                   hidden_states_across_dp)
 
-
         quant_kwargs = {}
         if (self.quant_method.__class__.__name__ in ("Fp8MoEMethod")):
             quant_kwargs["ep_rank"] = self.ep_rank
@@ -941,14 +949,18 @@ class FusedMoE(torch.nn.Module):
                 start = 0 if self.dp_rank == 0 else cu_tokens_across_dp_cpu[
                     self.dp_rank - 1]
                 end = cu_tokens_across_dp_cpu[self.dp_rank]
-                all_hidden_states = get_dp_group().all_reduce(final_hidden_states)
+                all_hidden_states = get_dp_group().all_reduce(
+                    final_hidden_states)
                 final_hidden_states = all_hidden_states[start:end, :]
             else:
                 import habana_frameworks.torch as htorch
                 htorch.core.mark_step()
                 local_hidden_states = get_forward_context(
                 ).dp_metadata.hidden_states
-                torch.distributed.reduce_scatter_tensor(local_hidden_states, final_hidden_states, group=get_dp_group().device_group)
+                torch.distributed.reduce_scatter_tensor(
+                    local_hidden_states,
+                    final_hidden_states,
+                    group=get_dp_group().device_group)
 
                 final_hidden_states = local_hidden_states
 
@@ -975,6 +987,7 @@ class FusedMoE(torch.nn.Module):
                 ("w3", ckpt_up_proj_name),
             ]
         ]
+
 
 def moe_forward(hidden_states: torch.Tensor, router_logits: torch.Tensor,
                 layer_name: str) -> torch.Tensor:
