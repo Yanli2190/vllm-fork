@@ -5,6 +5,8 @@ BASH_DIR=$(dirname "${BASH_SOURCE[0]}")
 if [ "$2" == "master" ] || [ -z "$1" ] || [ "$1" == "g10" ] || [ "$1" == "pcie4" ]; then
     source "$BASH_DIR"/start_etcd_mooncake_master.sh
     echo "source "$BASH_DIR"/start_etcd_mooncake_master.sh"
+else
+    sleep 30
 fi
 
 sleep 30
