@@ -681,6 +681,8 @@ class OpenAIServingChat(OpenAIServing):
 
         created_time = int(time.time())
         final_res: Optional[RequestOutput] = None
+        reasoning_content = None
+        content = None
 
         try:
             async for res in result_generator:

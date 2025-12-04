@@ -9,6 +9,7 @@ import sys
 import threading
 import time
 from abc import ABC, abstractmethod
+from asyncio import CancelledError
 from typing import Callable, Optional
 
 import aiohttp
@@ -17,9 +18,10 @@ import uvicorn
 from colorlog.escape_codes import escape_codes
 from fastapi import (APIRouter, Depends, FastAPI, Header, HTTPException,
                      Request, status)
-from fastapi.responses import JSONResponse, StreamingResponse, PlainTextResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import (JSONResponse, PlainTextResponse,
+                               StreamingResponse)
 from transformers import AutoTokenizer
-from asyncio import CancelledError
 
 formatter = logging.Formatter("[%(asctime)s] %(levelname)s - %(message)s",
                               "%Y-%m-%d %H:%M:%S")
@@ -31,28 +33,53 @@ logger.setLevel(logging.INFO)
 logger.addHandler(handler)
 logger.propagate = False
 
-from fastapi.middleware.cors import CORSMiddleware
 
-def log_info_blue(msg):
-    logger.info("%s%s%s", escape_codes['cyan'], msg, escape_codes['reset'])
-
-
-def log_info_green(msg):
-    logger.info("%s%s%s", escape_codes['green'], msg, escape_codes['reset'])
+def log_info_color(color, msg, *args):
+    """Generic colored log with parameterized message."""
+    msg_colored = f"{escape_codes[color]}{msg}{escape_codes['reset']}"
+    logger.info(msg_colored, *args)
 
 
-def log_info_yellow(msg):
-    logger.info("%s%s%s", escape_codes['yellow'], msg, escape_codes['reset'])
+def log_info_blue(msg, *args):
+    log_info_color('cyan', msg, *args)
 
 
-def log_info_red(msg):
-    logger.info("%s%s%s", escape_codes['red'], msg, escape_codes['reset'])
+def log_info_green(msg, *args):
+    log_info_color('green', msg, *args)
+
+
+def log_info_yellow(msg, *args):
+    log_info_color('yellow', msg, *args)
+
+
+def log_info_red(msg, *args):
+    log_info_color('red', msg, *args)
 
 
 AIOHTTP_TIMEOUT = aiohttp.ClientTimeout(total=None,
                                         connect=None,
                                         sock_read=None,
                                         sock_connect=None)
+
+
+def query_instance_model_len(instances, timeout=5.0):
+    """
+    Query each instance for its max_model_len.
+    """
+    model_lens = []
+    for inst in instances:
+        try:
+            url = f"http://{inst}/v1/models"
+            resp = requests.get(url, timeout=timeout)
+            resp.raise_for_status()
+            data = resp.json()["data"][0]
+            max_len = data.get("max_model_len", 0)
+            model_lens.append(max_len)
+            logger.info("Instance %s model_len: %d", inst, max_len)
+        except Exception as e:
+            logger.warning("Failed to get model_len from %s: %s", inst, e)
+            sys.exit(1)
+    return model_lens
 
 
 async def P_first_token_generator(generator_p,
@@ -68,11 +95,9 @@ async def P_first_token_generator(generator_p,
             yield chunk
     finally:
         if callback_owner:
-            callback_owner.exception_handler(
-                prefill_instance=prefill_instance,
-                decode_instance=None,
-                req_len=req_len
-            )
+            callback_owner.exception_handler(prefill_instance=prefill_instance,
+                                             decode_instance=None,
+                                             req_len=req_len)
 
     try:
         async for chunk in generator_d:
@@ -82,11 +107,10 @@ async def P_first_token_generator(generator_p,
             yield chunk
     finally:
         if callback_owner:
-            callback_owner.exception_handler(
-                prefill_instance=None,
-                decode_instance=decode_instance,
-                req_len=req_len
-            )
+            callback_owner.exception_handler(prefill_instance=None,
+                                             decode_instance=decode_instance,
+                                             req_len=req_len)
+
 
 async def D_first_token_generator(generator_p,
                                   generator_d,
@@ -99,22 +123,19 @@ async def D_first_token_generator(generator_p,
             continue
     finally:
         if callback_owner:
-            callback_owner.exception_handler(
-                prefill_instance=prefill_instance,
-                decode_instance=None,
-                req_len=req_len
-            )
-    
+            callback_owner.exception_handler(prefill_instance=prefill_instance,
+                                             decode_instance=None,
+                                             req_len=req_len)
+
     try:
         async for chunk in generator_d:
             yield chunk
     finally:
         if callback_owner:
-            callback_owner.exception_handler(
-                prefill_instance=None,
-                decode_instance=decode_instance,
-                req_len=req_len
-            )
+            callback_owner.exception_handler(prefill_instance=None,
+                                             decode_instance=decode_instance,
+                                             req_len=req_len)
+
 
 class SchedulingPolicy(ABC):
 
@@ -197,25 +218,43 @@ class Proxy:
         self.router.post("/instances/add",
                          dependencies=[Depends(self.api_key_authenticate)
                                        ])(self.add_instance_endpoint)
-        self.router.get("/health", response_class=PlainTextResponse)(self.get_health)
-        self.router.get("/ping", response_class=PlainTextResponse)(self.get_ping)
-        self.router.post("/ping", response_class=PlainTextResponse)(self.get_ping)
-        self.router.post("/tokenize", response_class=JSONResponse)(self.post_tokenize)
-        self.router.post("/detokenize", response_class=JSONResponse)(self.post_detokenize)
-        self.router.get("/v1/models", response_class=JSONResponse)(self.get_models)
-        self.router.get("/version", response_class=JSONResponse)(self.get_version)
-        self.router.post("/v1/embeddings", response_class=JSONResponse)(self.post_embeddings)
-        self.router.post("/pooling", response_class=JSONResponse)(self.post_pooling)
-        self.router.post("/score", response_class=JSONResponse)(self.post_score)
-        self.router.post("/v1/score", response_class=JSONResponse)(self.post_scorev1)
-        self.router.post("/rerank", response_class=JSONResponse)(self.post_rerank)
-        self.router.post("/v1/rerank", response_class=JSONResponse)(self.post_rerankv1)
-        self.router.post("/v2/rerank", response_class=JSONResponse)(self.post_rerankv2)
-        self.router.post("/invocations", response_class=JSONResponse)(self.post_invocations)
+        self.router.get("/health",
+                        response_class=PlainTextResponse)(self.get_health)
+        self.router.get("/ping",
+                        response_class=PlainTextResponse)(self.get_ping)
+        self.router.post("/ping",
+                         response_class=PlainTextResponse)(self.get_ping)
+        self.router.post("/tokenize",
+                         response_class=JSONResponse)(self.post_tokenize)
+        self.router.post("/detokenize",
+                         response_class=JSONResponse)(self.post_detokenize)
+        self.router.get("/v1/models",
+                        response_class=JSONResponse)(self.get_models)
+        self.router.get("/version",
+                        response_class=JSONResponse)(self.get_version)
+        self.router.post("/v1/embeddings",
+                         response_class=JSONResponse)(self.post_embeddings)
+        self.router.post("/pooling",
+                         response_class=JSONResponse)(self.post_pooling)
+        self.router.post("/score",
+                         response_class=JSONResponse)(self.post_score)
+        self.router.post("/v1/score",
+                         response_class=JSONResponse)(self.post_scorev1)
+        self.router.post("/rerank",
+                         response_class=JSONResponse)(self.post_rerank)
+        self.router.post("/v1/rerank",
+                         response_class=JSONResponse)(self.post_rerankv1)
+        self.router.post("/v2/rerank",
+                         response_class=JSONResponse)(self.post_rerankv2)
+        self.router.post("/invocations",
+                         response_class=JSONResponse)(self.post_invocations)
 
-    async def get_from_instance(self, path: str, is_full_instancelist: int = 0):
+    async def get_from_instance(self,
+                                path: str,
+                                is_full_instancelist: int = 0):
         if not self.prefill_instances:
-            return JSONResponse(content={"error": "No instances available"}, status_code=500)
+            return JSONResponse(content={"error": "No instances available"},
+                                status_code=500)
 
         if is_full_instancelist == 0:
             instances = [self.prefill_instances[0]]
@@ -240,10 +279,7 @@ class Proxy:
                             "data": data
                         }
                 except Exception as e:
-                    results[inst] = {
-                        "status": 500,
-                        "error": str(e)
-                    }
+                    results[inst] = {"status": 500, "error": str(e)}
                     print(f"Failed to fetch {url}: {e}, continue...")
 
         return JSONResponse(content=results, status_code=200)
@@ -260,42 +296,37 @@ class Proxy:
     async def get_ping(self):
         return await self.get_from_instance("/ping", is_full_instancelist=1)
 
-    async def post_to_instance(
-        self,
-        request: Request,
-        path: str,
-        json_template: dict
-    ):
+    async def post_to_instance(self, request: Request, path: str,
+                               json_template: dict):
         body = await request.json()
 
-        missing = [k for k in json_template.keys() if k not in body]
+        missing = [k for k in json_template if k not in body]
         if missing:
             return JSONResponse(
                 {"error": f"Missing required fields: {', '.join(missing)}"},
-                status_code=400
-            )
+                status_code=400)
 
         payload = json_template.copy()
         payload.update(body)
 
         url = f"http://{self.prefill_instances[0]}{path}"
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload) as resp:
-                    try:
-                        content = await resp.json()
-                    except aiohttp.ContentTypeError:
-                        content = {"raw": await resp.text()}
-                    return JSONResponse(content, status_code=resp.status)
+            async with aiohttp.ClientSession() as session, \
+                    session.post(url, json=payload) as resp:
+                try:
+                    content = await resp.json()
+                except aiohttp.ContentTypeError:
+                    content = {"raw": await resp.text()}
+                return JSONResponse(content, status_code=resp.status)
         except Exception as e:
             return JSONResponse(
                 {"error": f"Failed to fetch {url}, reason: {str(e)}"},
-                status_code=500
-            )
+                status_code=500)
 
     async def post_detokenize(self, request: Request):
         json_template = {"model": "", "tokens": []}
-        return await self.post_to_instance(request, "/detokenize", json_template)
+        return await self.post_to_instance(request, "/detokenize",
+                                           json_template)
 
     async def post_tokenize(self, request: Request):
         json_template = {"model": "", "prompt": ""}
@@ -303,18 +334,29 @@ class Proxy:
 
     async def post_embeddings(self, request: Request):
         json_template = {"model": "", "input": ""}
-        return await self.post_to_instance(request, "/v1/embeddings", json_template)
+        return await self.post_to_instance(request, "/v1/embeddings",
+                                           json_template)
 
     async def post_pooling(self, request: Request):
         json_template = {"model": "", "messages": ""}
         return await self.post_to_instance(request, "/pooling", json_template)
 
     async def post_score(self, request: Request):
-        json_template = {"model": "", "text_1": "", "text_2": "", "predictions": ""}
+        json_template = {
+            "model": "",
+            "text_1": "",
+            "text_2": "",
+            "predictions": ""
+        }
         return await self.post_to_instance(request, "/score", json_template)
 
     async def post_scorev1(self, request: Request):
-        json_template = {"model": "", "text_1": "", "text_2": "", "predictions": ""}
+        json_template = {
+            "model": "",
+            "text_1": "",
+            "text_2": "",
+            "predictions": ""
+        }
         return await self.post_to_instance(request, "/v1/score", json_template)
 
     async def post_rerank(self, request: Request):
@@ -323,15 +365,18 @@ class Proxy:
 
     async def post_rerankv1(self, request: Request):
         json_template = {"model": "", "query": "", "documents": ""}
-        return await self.post_to_instance(request, "/v1/rerank", json_template)
+        return await self.post_to_instance(request, "/v1/rerank",
+                                           json_template)
 
     async def post_rerankv2(self, request: Request):
         json_template = {"model": "", "query": "", "documents": ""}
-        return await self.post_to_instance(request, "/v2/rerank", json_template)
+        return await self.post_to_instance(request, "/v2/rerank",
+                                           json_template)
 
     async def post_invocations(self, request: Request):
         json_template = {"model": "", "prompt": ""}
-        return await self.post_to_instance(request, "/invocations", json_template)
+        return await self.post_to_instance(request, "/invocations",
+                                           json_template)
 
     async def validate_json_request(self, raw_request: Request):
         content_type = raw_request.headers.get("content-type", "").lower()
@@ -490,8 +535,10 @@ class Proxy:
     def schedule(self,
                  cycler: itertools.cycle,
                  is_prompt: int = None,
-                 request_len: Optional[int] = None) -> str:
-        return self.scheduling_policy.schedule(cycler, is_prompt, request_len)
+                 request_len: Optional[int] = None,
+                 max_tokens: Optional[int] = None) -> str:
+        return self.scheduling_policy.schedule(cycler, is_prompt, request_len,
+                                               max_tokens)
 
     def schedule_completion(self,
                             prefill_instance: str = None,
@@ -518,28 +565,33 @@ class Proxy:
         elif isinstance(prompt, list):
             if all(isinstance(p, str) for p in prompt):
                 return sum(len(self.tokenizer(p)["input_ids"]) for p in prompt)
-            elif (all(isinstance(p, list) and 
-                all(isinstance(x, int) for x in p) for p in prompt)):
+            elif (all(
+                    isinstance(p, list) and all(isinstance(x, int) for x in p)
+                    for p in prompt)):
                 # Already tokenized
                 return sum(len(p) for p in prompt)
+            elif all(isinstance(p, dict) and "text" in p for p in prompt):
+                return sum(
+                    len(self.tokenizer(p["text"])["input_ids"])
+                    for p in prompt)
             else:
                 logger.error(
                     "Unsupported prompt format: %s / nested types. Value: %r",
-                    type(prompt), prompt
-                )
+                    type(prompt), prompt)
                 return fake_len
         else:
             logger.error("Unsupported prompt type: %s", type(prompt))
             return fake_len
 
-    def exception_handler(self, prefill_instance=None, decode_instance=None, req_len=None):
+    def exception_handler(self,
+                          prefill_instance=None,
+                          decode_instance=None,
+                          req_len=None):
         if prefill_instance or decode_instance:
             try:
-                self.on_done(
-                    prefill_instance=prefill_instance,
-                    decode_instance=decode_instance,
-                    req_len=req_len
-                )
+                self.on_done(prefill_instance=prefill_instance,
+                             decode_instance=decode_instance,
+                             req_len=req_len)
             except Exception as e:
                 logger.error(f"Error releasing instances: {e}")
                 raise
@@ -552,36 +604,48 @@ class Proxy:
             prefill_instance = None
             decode_instance = None
 
-            if len(self.prefill_instances) > 0:
-                kv_prepare_request = request.copy()
-                kv_prepare_request["max_tokens"] = 1
+            kv_prepare_request = request.copy()
+            kv_prepare_request["max_tokens"] = 1
 
-                start_time = time.time()
-                prompt = kv_prepare_request.get("prompt")
-                total_length = self.get_total_token_length(prompt)
-                end_time = time.time()
+            start_time = time.time()
+            prompt = kv_prepare_request.get("prompt")
+            total_length = self.get_total_token_length(prompt)
+            max_tokens = request.get("max_tokens", 0)
+            end_time = time.time()
+            log_info_green(
+                f"create_completion -- prompt length: {total_length}, "
+                f"max tokens: {max_tokens}, "
+                f"tokenizer took {(end_time - start_time) * 1000:.2f} ms")
 
-                log_info_green(
-                    f"create_completion -- prompt length: {total_length}, "
-                    f"tokenizer took "
-                    f"{(end_time - start_time) * 1000:.2f} ms")
-                prefill_instance = self.schedule(self.prefill_cycler,
-                                                 is_prompt=True,
-                                                 request_len=total_length)
-                value = b''
-                try:
-                    async for chunk in self.forward_request(
-                            f"http://{prefill_instance}/v1/completions",
-                            kv_prepare_request):
-                        value += chunk
-                except HTTPException as http_exc:
-                    self.exception_handler(prefill_instance, decode_instance, total_length)
-                    raise http_exc
+            prefill_instance = self.schedule(self.prefill_cycler,
+                                             is_prompt=True,
+                                             request_len=total_length,
+                                             max_tokens=1)
 
-            # Perform kv recv and decoding stage
             decode_instance = self.schedule(self.decode_cycler,
                                             is_prompt=False,
-                                            request_len=total_length)
+                                            request_len=total_length,
+                                            max_tokens=max_tokens)
+
+            if prefill_instance is None or decode_instance is None:
+                log_info_red("No available instance can handle the request. ")
+                self.exception_handler(prefill_instance=prefill_instance,
+                                       decode_instance=decode_instance,
+                                       req_len=total_length)
+                return None
+
+            value = b''
+            try:
+                async for chunk in self.forward_request(
+                        f"http://{prefill_instance}/v1/completions",
+                        kv_prepare_request):
+                    value += chunk
+            except HTTPException as http_exc:
+                self.exception_handler(prefill_instance, decode_instance,
+                                       total_length)
+                raise http_exc
+
+            # Perform kv recv and decoding stage
             value = value.strip().decode("utf-8").removesuffix(
                 "data: [DONE]").encode("utf-8")
 
@@ -596,7 +660,8 @@ class Proxy:
                 generator_d = self.forward_request(
                     f"http://{decode_instance}/v1/completions", request)
             except HTTPException as http_exc:
-                self.exception_handler(prefill_instance, decode_instance, total_length)
+                self.exception_handler(prefill_instance, decode_instance,
+                                       total_length)
                 raise http_exc
 
             if request.get("stream", False):
@@ -610,21 +675,24 @@ class Proxy:
                                               prefill_instance,
                                               decode_instance,
                                               req_len=total_length)
-            media_type = (
-                "text/event-stream"
-                if request.get("stream", False)
-                else "application/json"
-            )
+            media_type = ("text/event-stream" if request.get("stream", False)
+                          else "application/json")
+
             async def wrapped_generator():
                 try:
                     async for chunk in final_generator:
                         yield chunk
                 except CancelledError:
-                    logger.warning("[0] Client disconnected during create_completion (CancelledError)")
+                    logger.warning(
+                        "[0]Client disconnected during create_completion "
+                        "(CancelledError)")
                 except Exception as e:
-                    logger.error("[1] Exception in wrapped_generator: %s", str(e))
+                    logger.error("[1] Exception in wrapped_generator: %s",
+                                 str(e))
                     raise
-            return StreamingResponse(wrapped_generator(), media_type=media_type)
+
+            return StreamingResponse(wrapped_generator(),
+                                     media_type=media_type)
         except Exception:
             exc_info = sys.exc_info()
             print("Error occurred in disagg proxy server")
@@ -641,12 +709,17 @@ class Proxy:
             # add params to request
             kv_prepare_request = request.copy()
             kv_prepare_request["max_tokens"] = 1
+            kv_prepare_request["max_completion_tokens"] = 1
 
             start_time = time.time()
             # prefill stage
             total_length = sum(
                 self.get_total_token_length(msg['content'])
                 for msg in kv_prepare_request['messages'])
+            max_tokens = request.get("max_completion_tokens", 0)
+            if max_tokens == 0:
+                max_tokens = request.get("max_tokens", 0)
+
             end_time = time.time()
             log_info_green(
                 f"create_chat_completion -- prompt length: {total_length}, "
@@ -655,7 +728,20 @@ class Proxy:
 
             prefill_instance = self.schedule(self.prefill_cycler,
                                              is_prompt=True,
-                                             request_len=total_length)
+                                             request_len=total_length,
+                                             max_tokens=1)
+
+            decode_instance = self.schedule(self.decode_cycler,
+                                            is_prompt=False,
+                                            request_len=total_length,
+                                            max_tokens=max_tokens)
+
+            if prefill_instance is None or decode_instance is None:
+                log_info_red("No available instance can handle the request. ")
+                self.exception_handler(prefill_instance=prefill_instance,
+                                       decode_instance=decode_instance,
+                                       req_len=total_length)
+                return None
 
             value = b''
             try:
@@ -664,12 +750,11 @@ class Proxy:
                         kv_prepare_request):
                     value += chunk
             except HTTPException as http_exc:
-                self.exception_handler(prefill_instance, decode_instance, total_length)
+                self.exception_handler(prefill_instance, decode_instance,
+                                       total_length)
                 raise http_exc
+
             # Perform kv recv and decoding stage
-            decode_instance = self.schedule(self.decode_cycler,
-                                            is_prompt=False,
-                                            request_len=total_length)
             value = value.strip().decode("utf-8").removesuffix(
                 "data: [DONE]").encode("utf-8")
 
@@ -685,7 +770,8 @@ class Proxy:
                     "http://" + decode_instance + "/v1/chat/completions",
                     request)
             except HTTPException as http_exc:
-                self.exception_handler(prefill_instance, decode_instance, total_length)
+                self.exception_handler(prefill_instance, decode_instance,
+                                       total_length)
                 raise http_exc
 
             if request.get("stream", False):
@@ -699,21 +785,24 @@ class Proxy:
                                               prefill_instance,
                                               decode_instance,
                                               req_len=total_length)
-            media_type = (
-                "text/event-stream"
-                if request.get("stream", False)
-                else "application/json"
-            )
+            media_type = ("text/event-stream" if request.get("stream", False)
+                          else "application/json")
+
             async def wrapped_generator():
                 try:
                     async for chunk in final_generator:
                         yield chunk
                 except CancelledError:
-                    logger.warning("[0] Client disconnected during create_completion (CancelledError)")
+                    logger.warning(
+                        "[0]Client disconnected during create_chat_completion "
+                        "(CancelledError)")
                 except Exception as e:
-                    logger.error("[1] Exception in wrapped_generator: %s", str(e))
+                    logger.error("[1] Exception in wrapped_generator: %s",
+                                 str(e))
                     raise
-            return StreamingResponse(wrapped_generator(), media_type=media_type)
+
+            return StreamingResponse(wrapped_generator(),
+                                     media_type=media_type)
         except Exception:
             exc_info = sys.exc_info()
             error_messages = [str(e) for e in exc_info if e]
@@ -724,6 +813,7 @@ class Proxy:
 
     def remove_instance_endpoint(self, instance_type, instance):
         return
+
 
 class RoundRobinSchedulingPolicy(SchedulingPolicy):
 
@@ -737,7 +827,8 @@ class RoundRobinSchedulingPolicy(SchedulingPolicy):
 
     def schedule(self,
                  cycler: itertools.cycle,
-                 request: Optional[dict[str, any]] = None) -> str:
+                 request: Optional[dict[str, any]] = None,
+                 max_tokens: Optional[int] = None) -> str:
         return self.safe_next(cycler)
 
 
@@ -764,16 +855,41 @@ class LoadBalancedScheduler(SchedulingPolicy):
         self.decode_schedule_index = 0
         self.decode_schedule_completion_index = 0
 
+        self.prefill_model_len = query_instance_model_len(prefill_instances)
+        self.decode_model_len = query_instance_model_len(decode_instances)
+
+        logger.info("Prefill instance model lens: %s", self.prefill_model_len)
+        logger.info("Decode instance model lens: %s", self.decode_model_len)
         super().__init__()
 
     def schedule(self,
                  cycler: itertools.cycle,
                  is_prompt: int = None,
-                 request_len: Optional[int] = None) -> str:
+                 request_len: int = None,
+                 max_tokens: int = None) -> str:
         with self.lock:
             if is_prompt:
-                min_value = min(self.prefill_utils_counter)
-                min_index = self.prefill_utils_counter.index(min_value)
+                candidates = [
+                    i for i, max_len in enumerate(self.prefill_model_len)
+                    if request_len + max_tokens <= max_len
+                ]
+                if not candidates:
+                    log_info_red(
+                        "No prefill instance can handle request_len=%d, "
+                        "max_tokens=%d",
+                        request_len,
+                        max_tokens,
+                    )
+                    return None
+
+                min_value = min(
+                    [self.prefill_utils_counter[i] for i in candidates])
+                min_indices = [
+                    i for i in candidates
+                    if self.prefill_utils_counter[i] == min_value
+                ]
+                min_index = min_indices[0]
+
                 self.prefill_bs_counter[min_index] += 1
                 self.prefill_utils_counter[min_index] += request_len
                 self.prefill_schedule_index += 1
@@ -782,14 +898,32 @@ class LoadBalancedScheduler(SchedulingPolicy):
                     f"instance = {min_index}, min_tokens = {min_value}")
                 return self.prefill_instances[min_index]
             else:
-                min_value = min(self.decode_bs_counter)
+                candidates = [
+                    i for i, max_len in enumerate(self.decode_model_len)
+                    if request_len + max_tokens <= max_len
+                ]
+                if not candidates:
+                    log_info_red(
+                        "No decode instance can handle request_len=%d, "
+                        "max_tokens=%d",
+                        request_len,
+                        max_tokens,
+                    )
+                    return None
 
+                min_value = min(
+                    [self.decode_bs_counter[i] for i in candidates])
+                min_indices = [
+                    i for i in candidates
+                    if self.decode_bs_counter[i] == min_value
+                ]
                 if min_value == 0:
-                    min_index = self.decode_bs_counter.index(min_value)
+                    min_index = next(i for i in candidates
+                                     if self.decode_bs_counter[i] == 0)
                 else:
                     min_indices = [
-                        i for i, val in enumerate(self.decode_bs_counter)
-                        if val == min_value
+                        i for i in candidates
+                        if self.decode_bs_counter[i] == min_value
                     ]
                     min_index = min(
                         min_indices,
@@ -817,12 +951,14 @@ class LoadBalancedScheduler(SchedulingPolicy):
             if prefill_instance:
                 index = self.prefill_instances.index(prefill_instance)
                 if self.prefill_bs_counter[index] == 0:
-                    logger.warning("No alive requests for prefill instance, skipping...")
+                    logger.warning(
+                        "No alive requests for prefill instance, skipping...")
                 else:
                     self.prefill_schedule_completion_index += 1
-                    log_info_yellow(f"<Prefill completed "
-                                    f"{self.prefill_schedule_completion_index}> "
-                                    f"instance = {index}, req_len={req_len}")
+                    log_info_yellow(
+                        f"<Prefill completed "
+                        f"{self.prefill_schedule_completion_index}> "
+                        f"instance = {index}, req_len={req_len}")
 
                     self.prefill_bs_counter[index] -= 1
                     all_zero = True
@@ -841,7 +977,8 @@ class LoadBalancedScheduler(SchedulingPolicy):
             if decode_instance:
                 index = self.decode_instances.index(decode_instance)
                 if self.decode_bs_counter[index] == 0:
-                    logger.warning("No alive requests for decode instance, skipping...")
+                    logger.warning(
+                        "No alive requests for decode instance, skipping...")
                 else:
                     self.decode_schedule_completion_index += 1
                     log_info_blue(f"<Decode completed "
