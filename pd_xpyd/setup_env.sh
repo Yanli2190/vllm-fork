@@ -20,12 +20,13 @@ pip install colorlog
 
 echo "2. setting up mooncake mooncake-transfer-engine build............."
 #Mooncake
-if [[ "$VERSION_ID" == "22.04" ]]; then
-wget https://github.com/hlin99/Mooncake/releases/download/private_buildv3/mooncake_transfer_engine-0.3.5-cp310-cp310-manylinux_2_17_x86_64.whl
-pip install mooncake_transfer_engine-0.3.5-cp310-cp310-manylinux_2_17_x86_64.whl --force-reinstall
-elif [[ "$VERSION_ID" == "24.04" ]]; then
-pip install mooncake_transfer_engine==0.3.6
-fi
+#if [[ "$VERSION_ID" == "22.04" ]]; then
+#wget https://github.com/hlin99/Mooncake/releases/download/private_buildv3/mooncake_transfer_engine-0.3.5-cp310-cp310-manylinux_2_17_x86_64.whl
+#pip install mooncake_transfer_engine-0.3.5-cp310-cp310-manylinux_2_17_x86_64.whl --force-reinstall
+#elif [[ "$VERSION_ID" == "24.04" ]]; then
+#pip install mooncake_transfer_engine==0.3.6
+#fi
+pip uninstall -y mooncake-transfer-engine && pip install mooncake-transfer-engine-non-cuda==0.3.7.post2
 
 echo "3. setting up RDMA for mooncake ..................."
 #RDMA
