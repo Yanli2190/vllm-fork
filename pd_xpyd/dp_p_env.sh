@@ -63,14 +63,6 @@ if [[ "$model_len" -eq 163840 ]]; then
     output_max=4096
 fi
 
-if [[ "$model_len" -eq 98304 && "$CHUNKED_PREFILL_ENABLED" -eq 0 ]]; then
-    export VLLM_GPU_MEMORY_UTILIZATION=0.27  ##96k
-    export VLLM_GRAPH_RESERVED_MEM=0.00001
-if [[ "$model_len" -eq 131072 && "$CHUNKED_PREFILL_ENABLED" -eq 0 ]]; then
-    export VLLM_GPU_MEMORY_UTILIZATION=0.34  ##128k
-    export VLLM_GRAPH_RESERVED_MEM=0.00001
-fi
-
 # ***************************************  bucketing ******************************************* #
 unset VLLM_PROMPT_BS_BUCKET_MIN VLLM_PROMPT_BS_BUCKET_STEP VLLM_PROMPT_BS_BUCKET_MAX VLLM_PROMPT_BS_BUCKET_LIMIT
 unset VLLM_PROMPT_SEQ_BUCKET_MIN VLLM_PROMPT_SEQ_BUCKET_STEP VLLM_PROMPT_SEQ_BUCKET_MAX VLLM_PROMPT_SEQ_BUCKET_LIMIT
@@ -86,8 +78,7 @@ export VLLM_DECODE_BLOCK_BUCKET_MIN=2
 export VLLM_DECODE_BLOCK_BUCKET_STEP=1
 export VLLM_DECODE_BLOCK_BUCKET_MAX=2
 
-#if [[ "$model_len" -eq 131072 || "$model_len" -eq 163840 ]]; then
-if [[ "$model_len" -ge 65536 ]]; then
+if [[ "$model_len" -eq 131072 || "$model_len" -eq 163840 ]]; then
     export VLLM_PROMPT_SEQ_BUCKET_STEP=1024
     export VLLM_PROMPT_BS_BUCKET_STEP=2
 fi
@@ -106,11 +97,6 @@ export PT_HPU_QKV_SLICE_SEQ_LEN_THLD=4096
 export PT_HPU_SDPA_BR_FACTOR=4096       # slice size on the query
 export PT_HPU_SDPA_BC_FACTOR=4096       # siice size on the kv
 export VLLM_FUSEDSDPA_QKV_SLICE_CHUNK_SIZE=4096 # qkv slice size in fp8 FSDPA
-
-if [[ "$model_len" -ge 65536 && "$CHUNKED_PREFILL_ENABLED" -eq 0 ]]; then
-    export VLLM_SUPPORT_MOE_SLICE=True
-    export VLLM_MOE_SLICE_LENGTH=8192
-fi
 
 # prefill specific setting
 export VLLM_SKIP_PREFILL_SAMPLING=1
