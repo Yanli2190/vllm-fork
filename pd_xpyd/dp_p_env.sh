@@ -66,7 +66,6 @@ fi
 if [[ "$model_len" -eq 98304 && "$CHUNKED_PREFILL_ENABLED" -eq 0 ]]; then
     export VLLM_GPU_MEMORY_UTILIZATION=0.27  ##96k
     export VLLM_GRAPH_RESERVED_MEM=0.00001
-fi
 if [[ "$model_len" -eq 131072 && "$CHUNKED_PREFILL_ENABLED" -eq 0 ]]; then
     export VLLM_GPU_MEMORY_UTILIZATION=0.34  ##128k
     export VLLM_GRAPH_RESERVED_MEM=0.00001
