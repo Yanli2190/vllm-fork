@@ -109,3 +109,11 @@ fi
 #export PT_HPU_SDPA_QKV_SLICE_MODE_FWD=0
 
 export INC_APPLY_OOT_PATCH=1
+
+# Config for easy capturing profile
+hl-prof-config --use-template profile_api_with_nics --fuser on --trace-analyzer on --gaudi2 --merged "hltv,csv"
+export HABANA_PROFILE=1
+export VLLM_PROFILER_ENABLED=1
+export VLLM_PROFILE_CONFIG_PATH=/workspace/profile_config.json
+export VLLM_TORCH_PROFILER_DIR=/workspace/profiles
+export HABANA_PROFILE_WRITE_HLTV=1

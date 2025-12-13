@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import copy
+import json
+import os
 import time
 from collections import Counter as collectionsCounter
 from collections import deque
@@ -10,7 +12,7 @@ from functools import partial
 from typing import (TYPE_CHECKING, Callable, ClassVar, Deque, Dict, Iterable,
                     List, Mapping, NamedTuple, Optional)
 from typing import Sequence as GenericSequence
-from typing import Set, Type, Union, cast, overload
+from typing import Set, Tuple, Type, Union, cast, overload
 
 import torch
 from typing_extensions import TypeVar, deprecated
@@ -231,6 +233,28 @@ class LLMEngine:
         self.observability_config = vllm_config.observability_config or ObservabilityConfig(  # noqa
         )
         self.kv_cache_shared_dict = SharedDict()
+
+        # Simple file-based IPC for profiling control.
+        self._profile_ipc_path: Optional[str] = os.getenv(
+            "VLLM_PROFILE_CONFIG_PATH")
+        self._profile_cfg: Optional[dict] = None
+        self._profile_started: bool = False
+        self._profile_steps_left: int = 0
+        self._profile_cfg_mtime_ns: int = 0
+        # Warmup state tracking
+        self._profile_warmup_steps_left: int = 0
+        self._profile_warmup_conditions_met: bool = False
+        self._profile_waiting_for_prompt_run: bool = False
+
+        # Lazy import helper to avoid circular imports
+        def _get_hpu_profiler():
+            try:
+                from vllm.worker.hpu_worker import HPUWorker  # local import
+                return getattr(HPUWorker, "profiler", None)
+            except Exception:
+                return None
+
+        self._get_hpu_profiler = _get_hpu_profiler
 
         self.need_to_sync_across_dp = self.parallel_config.data_parallel_size > 1  # noqa
         if self.need_to_sync_across_dp:
@@ -1411,6 +1435,41 @@ class LLMEngine:
         assert seq_group_metadata_list is not None
         assert scheduler_outputs is not None
 
+        # Check and potentially start profiling
+        original_profile_started = self._profile_started
+        original_profile_cfg = self._profile_cfg
+        original_profile_cfg_mtime_ns = self._profile_cfg_mtime_ns
+        original_warmup_steps_left = self._profile_warmup_steps_left
+        original_warmup_conditions_met = self._profile_warmup_conditions_met
+        print("step()->_profile_cfg is ", original_profile_cfg)
+
+        (self._profile_started, profile_steps_to_start, self._profile_cfg,
+         self._profile_cfg_mtime_ns, self._profile_warmup_steps_left,
+         self._profile_warmup_conditions_met
+         ) = self._check_and_start_profiling(
+             original_profile_started, original_profile_cfg,
+             original_profile_cfg_mtime_ns, original_warmup_steps_left,
+             original_warmup_conditions_met, self._profile_ipc_path,
+             self.scheduler, self.cache_config, self.parallel_config,
+             self.scheduler_config, self.vllm_config, seq_group_metadata_list,
+             self)
+
+        if profile_steps_to_start > 0:
+            profiler_obj = self._get_hpu_profiler()
+            if profiler_obj is not None:
+                try:
+                    # flush preceding device jobs
+                    torch.hpu.synchronize()
+                    profiler_obj.start()
+                    self._profile_steps_left = profile_steps_to_start
+                    print("[Profiler Debug] Profiler started successfully.",
+                          flush=True)
+                except Exception as e:
+                    print(f"[Profiler Debug] Profiler start failed: {e}")
+                    pass
+            else:
+                print("profiler_obj is None")
+
         if not scheduler_outputs.is_empty():
 
             # Check if we have a cached last_output from the previous iteration.
@@ -1520,6 +1579,27 @@ class LLMEngine:
             logger.debug("Stopping remote worker execution loop.")
             self.model_executor.stop_remote_worker_execution_loop()
 
+        if self._profile_started and self._profile_steps_left > 0:
+            self._profile_steps_left -= 1
+            if self._profile_steps_left == 0:
+                profiler_obj = self._get_hpu_profiler()
+                if profiler_obj is not None:
+                    try:
+                        os.remove(self._profile_ipc_path)
+                        profiler_obj.stop()
+                        print(
+                            "[Profiler Debug] Profiler stopped successfully.",
+                            flush=True)
+                    except Exception:
+                        pass
+                self._profile_started = False
+                # Reset config so that only a new IPC file can trigger next start
+                self._profile_cfg = None
+                self._profile_cfg_mtime_ns = 0
+                # Reset warmup state for next profiling session
+                self._profile_warmup_steps_left = 0
+                self._profile_warmup_conditions_met = False
+
         return ctx.request_outputs
 
     def _has_remaining_steps(
@@ -1541,6 +1621,279 @@ class LLMEngine:
                                  "have the same remaining steps.")
 
         return ref_remaining_steps > 0
+
+    @classmethod
+    def _check_and_start_profiling(
+            cls, profile_started: bool, profile_cfg: Optional[dict],
+            profile_cfg_mtime_ns: int, warmup_steps_left: int,
+            warmup_conditions_met: bool, profile_ipc_path: str, scheduler,
+            cache_config, parallel_config, scheduler_config, vllm_config,
+            seq_group_metadata_list: List[SequenceGroupMetadata],
+            instance) -> Tuple[bool, int, Optional[dict], int, int, bool]:
+        """Check profiling conditions and start profiler if conditions are met.
+
+        This method encapsulates the profiling logic that was previously inline
+        in the step function, making it more modular and testable. Includes warmup
+        logic to defer profiling start by specified number of steps.
+
+        Returns:
+            Tuple of (profile_started, profile_steps_left, updated_profile_cfg,
+                     updated_profile_cfg_mtime_ns, warmup_steps_left, warmup_conditions_met)
+        """
+        # Load/refresh profiling config when available or changed on disk
+        current_profile_cfg = profile_cfg
+        current_profile_cfg_mtime_ns = profile_cfg_mtime_ns
+
+        # Initialize warmup state variables
+        current_warmup_steps_left = warmup_steps_left
+        current_warmup_conditions_met = warmup_conditions_met
+
+        if (not profile_started) and profile_ipc_path:
+            try:
+                if os.path.exists(profile_ipc_path):
+                    st = os.stat(profile_ipc_path)
+                    if current_profile_cfg is None or st.st_mtime_ns > getattr(
+                            cls, "_profile_cfg_mtime_ns", 0):
+                        with open(profile_ipc_path) as f:
+                            current_profile_cfg = json.load(f)
+                        current_profile_cfg_mtime_ns = st.st_mtime_ns
+                        #print(f"Profile config file detected at {profile_ipc_path}. Loaded config: {current_profile_cfg}")
+
+            except Exception:
+                print(
+                    f"Exception type during profile config file open: {type(Exception).__name__}"
+                )
+                current_profile_cfg = None
+
+        # Start condition: in-flight equals target and current block size equals target
+        if (not profile_started) and current_profile_cfg is not None:
+            # Compute current in-flight requests (running queue size)
+            current_inflight = sum(len(s.running) for s in scheduler)
+            print("current_inflight is ", current_inflight)
+
+            # Check if this is a decode batch (D) or prefill batch (P)
+            is_decode_batch = any(
+                not seq_group_metadata.is_prompt
+                for seq_group_metadata in seq_group_metadata_list)
+
+            if is_decode_batch:
+                # Apply block padding algorithm only for decode batches (D)
+                # This ensures accurate alignment between profile and execution block numbers
+                current_batch_blocks = instance._forcast_block_padding(
+                    seq_group_metadata_list)
+            else:
+                # For prefill batches (P), we don't calculate current_batch_blocks
+                # because profile trigger condition remains ONLY the number of inflight requests
+                # Block size matching is not required for prefill profiling
+                current_batch_blocks = -1  # Sentinel value, not used in profiling decision
+
+            # Get raw block count for debugging
+            raw_block_count = len(
+                set(block_id for seq_group_metadata in seq_group_metadata_list
+                    for seq_id in seq_group_metadata.seq_data.keys()
+                    for block_id in seq_group_metadata.block_tables.get(
+                        seq_id, [])))
+            try:
+                target_inflight = int(current_profile_cfg.get("inflight", -1))
+                target_block_size = int(
+                    current_profile_cfg.get("block_size", -1))
+                profile_steps = int(current_profile_cfg.get("steps", 0))
+                warmup_steps = int(current_profile_cfg.get("warmup", 0))
+                profile_ranks_raw = current_profile_cfg.get(
+                    "profile_ranks", None)
+                allowed_ranks = None
+                if isinstance(profile_ranks_raw, list):
+                    try:
+                        allowed_ranks = set(int(r) for r in profile_ranks_raw)
+                    except Exception:
+                        allowed_ranks = None
+                # Role targeting: accept keys 'profile_targets' (list of 'P'/'D'/'both')
+                # or 'role' ('P'/'D'/'both') for backwards compatibility.
+                allowed_roles = None
+                profile_targets = current_profile_cfg.get("profile_targets")
+                if isinstance(profile_targets, list):
+                    allowed_roles = set(
+                        str(x).upper() for x in profile_targets)
+                else:
+                    role_single = current_profile_cfg.get("profile_targets")
+                    if isinstance(role_single, str):
+                        allowed_roles = {role_single.upper()}
+                prompt_run_flag = bool(
+                    current_profile_cfg.get("prompt_run", False))
+            except Exception:
+                target_inflight = target_block_size = -1
+                profile_steps = 0
+                warmup_steps = 0
+                allowed_ranks = None
+                allowed_roles = None
+                prompt_run_flag = False
+
+            # Determine this process rank (prefer torch.distributed, fallback to env)
+            try:
+                import torch
+                if torch.distributed.is_available(
+                ) and torch.distributed.is_initialized():
+                    current_rank = torch.distributed.get_rank()
+                else:
+                    current_rank = int(os.environ.get("RANK", "-1"))
+            except Exception:
+                current_rank = int(os.environ.get("RANK", "-1"))
+
+            # Rank gating: if profile_ranks provided, only those ranks participate
+            rank_allowed = True if (allowed_ranks is None) else (
+                current_rank in allowed_ranks)
+
+            # Role gating: determine whether this process is P (prefill) or D (decode)
+            # For non-disaggregated case, both P and D occur in this process.
+            try:
+                kv_cfg = getattr(vllm_config, 'kv_transfer_config', None)
+                is_disagg = kv_cfg is not None
+                is_decode_role = bool(
+                    kv_cfg and getattr(kv_cfg, 'is_kv_consumer', False))
+                this_role = 'D' if is_decode_role else 'P'
+            except Exception:
+                is_disagg = False
+                is_decode_role = False
+                this_role = 'P'
+            want_p = (allowed_roles is None
+                      or 'BOTH' in (allowed_roles or set())
+                      or 'P' in (allowed_roles or set()))
+            want_d = (allowed_roles is None
+                      or 'BOTH' in (allowed_roles or set())
+                      or 'D' in (allowed_roles or set()))
+            # If disaggregated: only the matching role participates.
+            # If not disaggregated: allow if either P or D is requested.
+            if is_disagg:
+                role_allowed = True if (allowed_roles is None or 'BOTH' in (
+                    allowed_roles or set())) else (this_role in allowed_roles)
+            else:
+                role_allowed = (want_p or want_d)
+            # Debug print for tracking profiler start conditions
+            if rank_allowed and role_allowed:
+                batch_type = "D" if is_decode_batch else "P"
+                if current_rank == 0:
+                    #if False:
+                    print(
+                        f"[Profiler Debug] Checking start conditions (batch_type={batch_type}): "
+                        f"target_inflight={target_inflight}, "
+                        f"target_block_size={target_block_size}, "
+                        f"profile_steps={profile_steps}, "
+                        f"current_inflight={current_inflight}, "
+                        f"current_batch_blocks={current_batch_blocks}, "
+                        f"raw_block_count={raw_block_count}, "
+                        f"profile_started={profile_started}, "
+                        f"disagg={is_disagg}, role={this_role}, is_decode_role={is_decode_role}, "
+                        f"rank_allowed={current_rank in (allowed_ranks or {current_rank})}, "
+                        f"role_allowed={role_allowed}")
+            # Start when:
+            #  - rank allowed, role allowed, profile_steps > 0
+            #  - inflight equals target
+            #  - D-path requires block-size >= target (lower bound); P-path does not
+            # For decode batches, the profiler starts only when prompt_run is true.
+            # For decode we can also capture the block size for logging/triggering.
+            if is_decode_batch:
+                block_condition_ok = (current_batch_blocks > 0
+                                      and target_block_size >= 0
+                                      and current_batch_blocks
+                                      >= target_block_size)
+            else:
+                block_condition_ok = True
+            if prompt_run_flag and is_decode_batch:
+                instance._profile_waiting_for_prompt_run = block_condition_ok
+                d_ok = False
+            elif prompt_run_flag and not is_decode_batch:
+                d_ok = block_condition_ok and instance._profile_waiting_for_prompt_run
+                instance._profile_waiting_for_prompt_run = False
+            else:
+                instance._profile_waiting_for_prompt_run = False
+                d_ok = block_condition_ok
+            if want_d and not is_decode_batch:
+                d_ok = False
+            p_ok = True  # no block-size gating for P
+            start_allowed = False
+            if is_disagg:
+                # On D node, require D condition; on P node, require P condition
+                if is_decode_role and want_d and d_ok:
+                    start_allowed = True
+                if (not is_decode_role) and want_p:
+                    start_allowed = True
+            else:
+                # Non-disaggregated: allow start if either requested path is satisfied
+                if (want_d and d_ok) or want_p:
+                    start_allowed = True
+
+            # Check if profiling conditions are met (before warmup logic)
+            conditions_met = (rank_allowed and role_allowed
+                              and profile_steps > 0 and target_inflight >= 0
+                              and current_inflight == target_inflight
+                              and start_allowed)
+
+            # Handle warmup logic
+            if conditions_met and not warmup_conditions_met:
+                # First time conditions are met - initialize warmup if needed
+                if warmup_steps > 0:
+                    current_warmup_steps_left = warmup_steps
+                    current_warmup_conditions_met = True
+                    print(
+                        f"\n{'='*80}\n"
+                        f"⏳ PROFILER WARMUP STARTED ⏳\n"
+                        f"{'='*80}\n"
+                        f"Rank: {current_rank} | Role: {this_role} | Disaggregated: {is_disagg}\n"
+                        f"Profiling conditions met, but deferring start for {warmup_steps} warmup steps\n"
+                        f"Inflight Requests: {current_inflight}\n"
+                        f"ACTUAL PADDED BLOCK SIZE: {current_batch_blocks}\n"
+                        f"Target Block Size (Lower Bound): {target_block_size}\n"
+                        f"Warmup Steps Remaining: {current_warmup_steps_left}\n"
+                        f"{'='*80}\n",
+                        flush=True)
+                    # Return without starting profiler, just update warmup state
+                    return profile_started, 0, current_profile_cfg, current_profile_cfg_mtime_ns, current_warmup_steps_left, current_warmup_conditions_met
+                else:
+                    # No warmup needed, can start immediately
+                    current_warmup_conditions_met = True
+
+            elif conditions_met and warmup_conditions_met and current_warmup_steps_left > 0:
+                # Warmup in progress - decrement counter
+                current_warmup_steps_left -= 1
+                if current_warmup_steps_left > 0:
+                    print(
+                        f"[Profiler Warmup] Conditions met, warmup steps remaining: {current_warmup_steps_left}",
+                        flush=True)
+                    # Return without starting profiler, continue warmup
+                    return profile_started, 0, current_profile_cfg, current_profile_cfg_mtime_ns, current_warmup_steps_left, current_warmup_conditions_met
+                else:
+                    # Warmup just completed; do not return. Fall through to start profiler this iteration.
+                    print(
+                        "[Profiler Warmup] Warmup complete; starting profiler this iteration",
+                        flush=True)
+
+            elif not conditions_met and warmup_conditions_met:
+                # Conditions no longer met during warmup - reset warmup state
+                current_warmup_steps_left = 0
+                current_warmup_conditions_met = False
+                print(
+                    "[Profiler Warmup] Conditions no longer met, resetting warmup state",
+                    flush=True)
+                return profile_started, 0, current_profile_cfg, current_profile_cfg_mtime_ns, current_warmup_steps_left, current_warmup_conditions_met
+
+            # Check if we should actually start profiling (conditions met and warmup complete)
+            if (conditions_met and current_warmup_steps_left == 0):
+                print(
+                    f"\n{'='*80}\n"
+                    f"🔥 PROFILER START TRIGGERED 🔥\n"
+                    f"{'='*80}\n"
+                    f"Rank: {current_rank} | Role: {this_role} | Disaggregated: {is_disagg}\n"
+                    f"Inflight Requests: {current_inflight}\n"
+                    f"ACTUAL PADDED BLOCK SIZE BEING PROFILED: {current_batch_blocks}\n"
+                    f"Target Block Size (Lower Bound): {target_block_size}\n"
+                    f"Profile Steps: {profile_steps}\n"
+                    f"{'='*80}\n",
+                    flush=True)
+
+                # Return updated state indicating profiler should start
+                return True, profile_steps, current_profile_cfg, current_profile_cfg_mtime_ns, current_warmup_steps_left, current_warmup_conditions_met
+
+        return profile_started, 0, current_profile_cfg, current_profile_cfg_mtime_ns, current_warmup_steps_left, current_warmup_conditions_met
 
     def _cache_scheduler_outputs_for_multi_step(
             self, virtual_engine: int,

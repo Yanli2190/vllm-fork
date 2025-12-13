@@ -117,11 +117,12 @@ class HPUWorker(LocalOrDistributedWorkerBase):
 
             if os.getenv('VLLM_PROFILER_ENABLED') == 'full':
                 fn = self.full_trace_handler
-                with_stack = False
+                with_stack = True
             else:
                 fn = torch.profiler.tensorboard_trace_handler
                 with_stack = True
-            self.profiler = torch.profiler.profile(
+            #self.profiler = torch.profiler.profile(
+            HPUWorker.profiler = torch.profiler.profile(
                 activities=[
                     torch.profiler.ProfilerActivity.CPU,
                     torch.profiler.ProfilerActivity.HPU,
@@ -130,6 +131,7 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                 on_trace_ready=fn(torch_profiler_trace_dir, use_gzip=True))
         else:
             self.profiler = None
+            HPUWorker.profiler = None
 
     def full_trace_handler(self, dir_name, use_gzip=False):
 
@@ -182,7 +184,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
         return self.model_config.is_encoder_decoder
 
     def start_profile(self):
-        if self.profiler is None:
+        #if self.profiler is None:
+        if HPUWorker.profiler is None:
             raise RuntimeError("Profiler is not enabled.")
         high_level_profiler = self.model_runner.profiler
         with high_level_profiler.record_event('internal', 'start_profiler'):
@@ -192,7 +195,8 @@ class HPUWorker(LocalOrDistributedWorkerBase):
                     high_level_profiler.profiling_trace_events.get_nowait()
                 except queue.Empty:
                     break
-            self.profiler.start()
+            #self.profiler.start()
+            HPUWorker.profiler.start()
 
     def stop_profile(self):
         if self.profiler is None:

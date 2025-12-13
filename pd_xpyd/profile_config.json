@@ -1,0 +1,9 @@
+{
+    "inflight": 1,
+    "block_size": 1,
+    "steps": 2,
+    "profile_ranks": ["0"],
+    "profile_targets": "P",
+    "warmup": 0,
+    "prompt_run": false
+}
