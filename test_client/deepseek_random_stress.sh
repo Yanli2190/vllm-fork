@@ -1,4 +1,4 @@
-/!/bin/bash
+#!/bin/bash
 
 #model_path=/data/hf_models/DeepSeek-R1-G2-static
 model_path=/mnt/disk2/hf_models/DeepSeek-R1-G2/
