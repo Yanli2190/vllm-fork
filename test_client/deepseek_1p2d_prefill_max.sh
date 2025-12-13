@@ -15,9 +15,7 @@ test_benchmark_serving() {
     local_input=$1
     local_output=$2
     local_max_concurrency=$3
-    #local_num_prompts=$(( local_max_concurrency * 1 ))
     local_num_prompts=$(( local_max_concurrency * 16 ))
-    #local_num_prompts=$(( local_max_concurrency * 48 ))
     config=$4
     local_len_ratio=1.0
     start=$(date +%s)
