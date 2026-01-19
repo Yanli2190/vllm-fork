@@ -106,7 +106,6 @@ if [ "$INC_FP8" -eq 1 ]; then
   export VLLM_MOE_N_SLICE=1
   export VLLM_HPU_MARK_SCALES_AS_CONST=false
   export RUNTIME_SCALE_PATCHING=1
-  export INC_FORCE_NAIVE_SCALING=1
 fi
 #Fall back to FA2
 #export PT_HPU_SDPA_QKV_SLICE_MODE_FWD=0
